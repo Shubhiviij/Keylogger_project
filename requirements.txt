@@ -1,0 +1,6 @@
+pynput
+Pillow
+schedule
+requests
+pyperclip
+Flask

